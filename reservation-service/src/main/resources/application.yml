@@ -1,0 +1,52 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: reservation-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/reservations}
+    username: ${DB_USER:reservation}
+    password: ${DB_PASSWORD:change-me}
+  jpa:
+    hibernate.ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: true
+
+room:
+  grpc:
+    host: ${ROOM_GRPC_HOST:room-service}
+    port: ${ROOM_GRPC_PORT:9090}
+    deadline-ms: ${ROOM_GRPC_DEADLINE_MS:2000}
+    retry:
+      max-attempts: 3
+      initial-backoff-ms: 200
+      multiplier: 2.0
+
+billing:
+  soap-uri: ${BILLING_SOAP_URI:http://billing-service:8083/ws}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      billing:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
+  timelimiter:
+    instances:
+      billing:
+        timeout-duration: 3s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,circuitbreakers
+  endpoint:
+    health:
+      show-details: always

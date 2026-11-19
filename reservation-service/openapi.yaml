@@ -1,0 +1,332 @@
+openapi: 3.0.3
+info:
+  title: HotelBooking – reservation-service API
+  version: 1.0.0
+  description: |
+    API REST publique (via api-gateway) pour consulter les chambres,
+    gérer les clients et le cycle de vie des réservations
+    (CREEE → CONFIRMEE / ANNULEE).
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Via API Gateway
+
+tags:
+  - name: Rooms
+  - name: Clients
+  - name: Reservations
+
+paths:
+  /rooms/available:
+    get:
+      tags: [Rooms]
+      summary: Consulter les chambres disponibles sur une période
+      description: Délègue à room-service (gRPC StreamAvailableRooms).
+      operationId: listAvailableRooms
+      parameters:
+        - { name: checkIn, in: query, required: true, schema: { type: string, format: date } }
+        - { name: checkOut, in: query, required: true, schema: { type: string, format: date } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/RoomType' } }
+        - { name: minCapacity, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Liste des chambres disponibles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Room' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /clients:
+    post:
+      tags: [Clients]
+      summary: Créer un client
+      operationId: createClient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientInput' }
+      responses:
+        '201':
+          description: Client créé
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /clients/{clientId}:
+    parameters:
+      - { $ref: '#/components/parameters/ClientId' }
+    get:
+      tags: [Clients]
+      summary: Consulter un client
+      operationId: getClient
+      responses:
+        '200':
+          description: Client
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Clients]
+      summary: Modifier un client
+      operationId: updateClient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientInput' }
+      responses:
+        '200':
+          description: Client modifié
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /clients/{clientId}/reservations:
+    parameters:
+      - { $ref: '#/components/parameters/ClientId' }
+    get:
+      tags: [Reservations]
+      summary: Suivre les réservations d'un client
+      operationId: listClientReservations
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ReservationStatus' }
+      responses:
+        '200':
+          description: Réservations du client
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Reservation' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reservations:
+    post:
+      tags: [Reservations]
+      summary: Créer une réservation
+      description: |
+        Vérifie la disponibilité via room-service (gRPC `CheckAvailability`,
+        deadline + retry). Statut initial : CREEE.
+      operationId: createReservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReservationInput' }
+      responses:
+        '201':
+          description: Réservation créée
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /reservations/{reservationId}:
+    parameters:
+      - { $ref: '#/components/parameters/ReservationId' }
+    get:
+      tags: [Reservations]
+      summary: Consulter une réservation
+      operationId: getReservation
+      responses:
+        '200':
+          description: Réservation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Reservations]
+      summary: Modifier les dates / la chambre (statut CREEE uniquement)
+      operationId: updateReservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReservationInput' }
+      responses:
+        '200':
+          description: Réservation modifiée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Reservations]
+      summary: Annuler une réservation
+      description: Passe le statut à ANNULEE (suppression logique).
+      operationId: cancelReservation
+      responses:
+        '200':
+          description: Réservation annulée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /reservations/{reservationId}/confirm:
+    parameters:
+      - { $ref: '#/components/parameters/ReservationId' }
+    post:
+      tags: [Reservations]
+      summary: Confirmer une réservation et déclencher la facturation
+      description: |
+        Appelle billing-service (SOAP `generateInvoice`) protégé par un
+        circuit breaker. En cas d'échec, la réservation est confirmée avec
+        une facture « EN_ATTENTE » (méthode de repli).
+      operationId: confirmReservation
+      responses:
+        '200':
+          description: Réservation confirmée
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /reservations/{reservationId}/invoice:
+    parameters:
+      - { $ref: '#/components/parameters/ReservationId' }
+    get:
+      tags: [Reservations]
+      summary: Obtenir la facture d'une réservation
+      description: Délègue à billing-service (SOAP `getInvoice`).
+      operationId: getReservationInvoice
+      responses:
+        '200':
+          description: Facture
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  parameters:
+    ClientId:
+      name: clientId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReservationId:
+      name: reservationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    RoomType:
+      type: string
+      enum: [SIMPLE, DOUBLE, SUITE]
+
+    ReservationStatus:
+      type: string
+      enum: [CREEE, CONFIRMEE, ANNULEE]
+
+    InvoiceStatus:
+      type: string
+      enum: [EN_ATTENTE, EMISE, PAYEE]
+
+    Room:
+      type: object
+      properties:
+        id: { type: string }
+        number: { type: string, example: "204" }
+        type: { $ref: '#/components/schemas/RoomType' }
+        capacity: { type: integer, example: 2 }
+        pricePerNight: { type: number, format: double, example: 120.0 }
+
+    ClientInput:
+      type: object
+      required: [firstName, lastName, email]
+      properties:
+        firstName: { type: string, maxLength: 80 }
+        lastName: { type: string, maxLength: 80 }
+        email: { type: string, format: email }
+        phone: { type: string }
+
+    Client:
+      allOf:
+        - $ref: '#/components/schemas/ClientInput'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+
+    ReservationInput:
+      type: object
+      required: [clientId, roomId, checkIn, checkOut]
+      properties:
+        clientId: { type: string, format: uuid }
+        roomId: { type: string }
+        checkIn: { type: string, format: date }
+        checkOut: { type: string, format: date }
+
+    Reservation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        clientId: { type: string, format: uuid }
+        roomId: { type: string }
+        checkIn: { type: string, format: date }
+        checkOut: { type: string, format: date }
+        status: { $ref: '#/components/schemas/ReservationStatus' }
+        totalPrice: { type: number, format: double }
+        invoiceStatus: { $ref: '#/components/schemas/InvoiceStatus' }
+        createdAt: { type: string, format: date-time }
+
+    Invoice:
+      type: object
+      properties:
+        invoiceId: { type: string }
+        reservationId: { type: string, format: uuid }
+        amountHT: { type: number }
+        tva: { type: number }
+        amountTTC: { type: number }
+        issueDate: { type: string, format: date }
+        status: { $ref: '#/components/schemas/InvoiceStatus' }
+
+    Error:
+      type: object
+      properties:
+        timestamp: { type: string, format: date-time }
+        status: { type: integer }
+        error: { type: string }
+        message: { type: string }
+        path: { type: string }
+
+  responses:
+    BadRequest:
+      description: Requête invalide
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    NotFound:
+      description: Ressource introuvable
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    Conflict:
+      description: Conflit (chambre indisponible ou transition de statut interdite)
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    ServiceUnavailable:
+      description: Service interne indisponible (timeout gRPC, etc.)
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }

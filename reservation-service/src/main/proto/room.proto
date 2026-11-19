@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package hotel.room.v1;
+
+option java_multiple_files = true;
+option java_package = "tn.hotel.room.v1";
+
+service RoomService {
+  // RPC unaire
+  rpc CheckAvailability (CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
+  // RPC streaming serveur
+  rpc StreamAvailableRooms (AvailableRoomsRequest) returns (stream Room);
+}
+
+message CheckAvailabilityRequest {
+  string room_id = 1;
+  string check_in = 2; // ISO-8601 yyyy-MM-dd
+  string check_out = 3;
+}
+
+message CheckAvailabilityResponse {
+  bool available = 1;
+  double price_per_night = 2;
+  string reason = 3; // rempli si indisponible
+}
+
+message AvailableRoomsRequest {
+  string check_in = 1;
+  string check_out = 2;
+  string type = 3; // optionnel : SIMPLE, DOUBLE, SUITE
+  int32 min_capacity = 4;
+}
+
+message Room {
+  string id = 1;
+  string number = 2;
+  string type = 3;
+  int32 capacity = 4;
+  double price_per_night = 5;
+}
