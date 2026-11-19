@@ -1,0 +1,1 @@
+ALTER TABLE invoices MODIFY COLUMN invoice_id VARCHAR(64) NOT NULL;
