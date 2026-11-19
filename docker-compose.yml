@@ -1,0 +1,129 @@
+name: hotelbooking
+
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    ports: ["8080:8080"]
+    environment:
+      RESERVATION_SERVICE_URL: http://reservation-service:8081
+      RATE_LIMIT_REPLENISH: "10"
+      RATE_LIMIT_BURST: "20"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    depends_on:
+      reservation-service: { condition: service_healthy }
+      redis: { condition: service_started }
+    networks: [hotel-net]
+
+  reservation-service:
+    build:
+      context: .
+      dockerfile: reservation-service/Dockerfile
+    ports: ["8081:8081"]
+    environment:
+      SERVER_PORT: 8081
+      DB_URL: jdbc:postgresql://reservation-db:5432/${RESERVATION_DB_NAME}
+      DB_USER: ${RESERVATION_DB_USER}
+      DB_PASSWORD: ${RESERVATION_DB_PASSWORD}
+      ROOM_GRPC_HOST: room-service
+      ROOM_GRPC_PORT: 9090
+      ROOM_GRPC_DEADLINE_MS: 2000
+      BILLING_SOAP_URI: http://billing-service:8083/ws
+    depends_on:
+      reservation-db: { condition: service_healthy }
+      room-service: { condition: service_started }
+      billing-service: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [hotel-net]
+
+  room-service:
+    build:
+      context: .
+      dockerfile: room-service/Dockerfile
+    ports: ["8082:8082", "9090:9090"]
+    environment:
+      GRPC_PORT: 9090
+      SERVER_PORT: 8082
+      DB_URL: jdbc:postgresql://room-db:5432/${ROOM_DB_NAME}
+      DB_USER: ${ROOM_DB_USER}
+      DB_PASSWORD: ${ROOM_DB_PASSWORD}
+    depends_on:
+      room-db: { condition: service_healthy }
+    networks: [hotel-net]
+
+  billing-service:
+    build:
+      context: .
+      dockerfile: billing-service/Dockerfile
+    ports: ["8083:8083"]
+    environment:
+      SERVER_PORT: 8083
+      DB_URL: jdbc:mysql://billing-db:3306/${BILLING_DB_NAME}
+      DB_USER: ${BILLING_DB_USER}
+      DB_PASSWORD: ${BILLING_DB_PASSWORD}
+    depends_on:
+      billing-db: { condition: service_healthy }
+    networks: [hotel-net]
+
+  reservation-db:
+    image: postgres:16
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: ${RESERVATION_DB_NAME}
+      POSTGRES_USER: ${RESERVATION_DB_USER}
+      POSTGRES_PASSWORD: ${RESERVATION_DB_PASSWORD}
+    volumes: [reservation-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RESERVATION_DB_USER} -d ${RESERVATION_DB_NAME}"]
+      interval: 5s
+      retries: 10
+    networks: [hotel-net]
+
+  room-db:
+    image: postgres:16
+    ports: ["5433:5432"]
+    environment:
+      POSTGRES_DB: ${ROOM_DB_NAME}
+      POSTGRES_USER: ${ROOM_DB_USER}
+      POSTGRES_PASSWORD: ${ROOM_DB_PASSWORD}
+    volumes: [room-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ROOM_DB_USER} -d ${ROOM_DB_NAME}"]
+      interval: 5s
+      retries: 10
+    networks: [hotel-net]
+
+  billing-db:
+    image: mysql:8.4
+    ports: ["3306:3306"]
+    environment:
+      MYSQL_DATABASE: ${BILLING_DB_NAME}
+      MYSQL_USER: ${BILLING_DB_USER}
+      MYSQL_PASSWORD: ${BILLING_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${BILLING_DB_ROOT_PASSWORD}
+    volumes: [billing-data:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      retries: 10
+    networks: [hotel-net]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    networks: [hotel-net]
+
+networks:
+  hotel-net:
+    driver: bridge
+
+volumes:
+  reservation-data:
+  room-data:
+  billing-data:
